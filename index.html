@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="dark light" />
+		<meta name="theme-color" content="#151820" />
+		<title>OMP Collab · maranone</title>
+		<meta
+			name="description"
+			content="Custom OMP Collab web client with a persistent TODO board, Titanium colors, expanded thinking, and a live task ticker."
+		/>
+		<meta name="author" content="maranone" />
+		<meta name="robots" content="noindex, nofollow" />
+		<link rel="canonical" href="https://maranone.github.io/omp-collab/" />
+		<link rel="icon" type="image/svg+xml" href="./bgzz43wz.svg" />
+		<link rel="icon" type="image/x-icon" href="./c5fw34cn.ico" sizes="any" />
+		<link rel="icon" type="image/png" sizes="256x256" href="./y3jr668h.png" />
+		<link rel="apple-touch-icon" sizes="180x180" href="./rd7wsmew.png" />
+		<link rel="manifest" href="./emptjmk5.webmanifest" />
+		<meta property="og:type" content="website" />
+		<meta property="og:url" content="https://maranone.github.io/omp-collab/" />
+		<meta property="og:title" content="OMP Collab · maranone" />
+		<meta property="og:description" content="Custom OMP Collab browser client." />
+	<link rel="stylesheet" crossorigin href="./4z1ck2yf.css"><script type="module" crossorigin src="./f36c89zc.js"></script></head>
+	<body>
+		<div id="root"></div>
+		<script>
+			(function () {
+				try {
+					var saved = localStorage.getItem("omp-collab-theme");
+					var theme = saved === "light" || saved === "system" ? saved : "dark";
+					if (theme === "system") theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+					document.documentElement.dataset.theme = theme;
+					document.documentElement.style.colorScheme = theme;
+				} catch (error) {
+					document.documentElement.dataset.theme = "dark";
+					document.documentElement.style.colorScheme = "dark";
+				}
+			})();
+		</script>
+		
+	</body>
+</html>
