@@ -15,6 +15,7 @@ export interface TranscriptProps {
 	streamDone: boolean;
 	activeTools: ReadonlyMap<string, ActiveTool>;
 	working: boolean;
+	maintenanceStatus?: string | null;
 	compact?: boolean; // dense variant for the agent drawer
 	/** Sub-session drill-down capabilities forwarded to tool renderers. */
 	host?: ToolRenderHost;
@@ -271,7 +272,7 @@ const WINDOW = 100;
 const EARLIER_TRIGGER_PX = 200;
 
 export function Transcript(props: TranscriptProps): ReactNode {
-	const { entries, stream, streamDone, activeTools, working, compact, host, phase } = props;
+	const { entries, stream, streamDone, activeTools, working, maintenanceStatus, compact, host, phase } = props;
 
 	// null follows the tail. A number pins the first mounted entry while the
 	// reader is scrolled away from the bottom, so appended entries never
@@ -422,7 +423,12 @@ export function Transcript(props: TranscriptProps): ReactNode {
 					))}
 				</Row>
 			)}
-			{working && stream === null && activeTools.size === 0 && (
+			{maintenanceStatus !== null && maintenanceStatus !== undefined && (
+				<Row kind="assistant" gutter="agent">
+					<div className="tr-shimmer">{maintenanceStatus}</div>
+				</Row>
+			)}
+			{maintenanceStatus == null && working && stream === null && activeTools.size === 0 && (
 				<Row kind="assistant" gutter="agent">
 					<div className="tr-shimmer">thinking…</div>
 				</Row>

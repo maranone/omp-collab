@@ -182,6 +182,7 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 							streamDone={snap.streamDone}
 							activeTools={snap.activeTools}
 							working={snap.working}
+							maintenanceStatus={snap.maintenanceStatus}
 							host={toolHost}
 							phase={snap.phase}
 						/>

@@ -64,6 +64,8 @@ export interface GuestSnapshot {
 	activeTools: ReadonlyMap<string, ActiveTool>;
 	/** agent_start..agent_end, reconciled by state.isStreaming. */
 	working: boolean;
+	/** Host-side maintenance currently replacing the generic thinking indicator. */
+	maintenanceStatus: string | null;
 	/** True when this guest joined through a read-only (view) link. */
 	readOnly: boolean;
 	/** Pending host-side UI request (`ask` select/editor) this guest can answer. */
@@ -151,6 +153,7 @@ export class GuestClient {
 	#streamDone = false;
 	#activeTools: ReadonlyMap<string, ActiveTool> = new Map();
 	#working = false;
+	#maintenanceStatus: string | null = null;
 	#readOnly = false;
 	#uiRequest: CollabUiRequest | null = null;
 	#uiRequestQueue: CollabUiRequest[] = [];
@@ -569,6 +572,7 @@ export class GuestClient {
 				break;
 			case "agent_end":
 				this.#working = false;
+				this.#maintenanceStatus = null;
 				break;
 			case "notice":
 				this.#pushNotice(event.level, event.message);
@@ -580,9 +584,12 @@ export class GuestClient {
 				if (!event.success) this.#pushNotice("error", event.finalError ?? "retry failed");
 				break;
 			case "auto_compaction_start":
-				this.#pushNotice("info", `compacting context (${event.reason})`);
+				this.#maintenanceStatus = event.action === "context-full"
+					? "Auto context-full maintenance…"
+					: "Auto-compaction maintenance…";
 				break;
 			case "auto_compaction_end":
+				this.#maintenanceStatus = null;
 				if (!event.skipped) {
 					this.#pushNotice(
 						"info",
@@ -636,6 +643,7 @@ export class GuestClient {
 			streamDone: this.#streamDone,
 			activeTools: this.#activeTools,
 			working: this.#working,
+			maintenanceStatus: this.#maintenanceStatus,
 			readOnly: this.#readOnly,
 			uiRequest: this.#uiRequest,
 			notices: this.#notices,
