@@ -1,0 +1,52 @@
+name: Deploy Collab web client
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this customized web client
+        uses: actions/checkout@v4
+        with:
+          path: site
+      - name: Check out the pinned OMP build workspace
+        uses: actions/checkout@v4
+        with:
+          repository: can1357/oh-my-pi
+          ref: 96e4d8eb5ba1212d2d6018f242de266284cffab9
+          path: upstream
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Build static site
+        run: |
+          cp -a site/collab-web/. upstream/packages/collab-web/
+          cd upstream
+          bun install --filter @oh-my-pi/collab-web --frozen-lockfile
+          bun --cwd=packages/collab-web run build
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: upstream/packages/collab-web/dist
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
