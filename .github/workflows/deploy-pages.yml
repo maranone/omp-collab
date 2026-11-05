@@ -41,7 +41,7 @@ jobs:
         run: |
           cp -a site/collab-web/. upstream/packages/collab-web/
           cd upstream
-					bun install --filter @oh-my-pi/collab-web
+          bun install --filter @oh-my-pi/collab-web
           bun --cwd=packages/collab-web run build
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
