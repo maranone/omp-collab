@@ -38,7 +38,7 @@ Rebuild from a checkout of the pinned upstream OMP workspace (`96e4d8eb5ba1212d2
 ```sh
 bun install                                # once; bun.lock regenerates if the catalog drifted
 bun run gen:export-viewer --write          # after component changes; writes packages/coding-agent/export-assets
-bun test voice                           # 93 voice tests
+bun test voice                           # 95 voice tests (226 across the package)
 bun x tsc --noEmit -p tsconfig.json      # not `bun run check:types`: it recurses into `check` on Bun 1.4.4
 bun x oxlint src test
 bun build ./index.html --outdir=dist --minify --define 'process.env.NODE_ENV="production"' \
