@@ -77,12 +77,14 @@ export class SpeechEngine {
 		return this.#paused;
 	}
 
-	/** Start consuming the queue (only ever called from a user gesture). */
+	/** Start consuming the queue. Only ever called from a user gesture (arm,
+	 * read history, read again); incoming events reach the engine through
+	 * `poke()`, which cannot revive a backend that errored out. A fresh gesture
+	 * is a fresh chance for that backend. */
 	start(): void {
 		if (this.#running) return;
 		this.#running = true;
 		this.#paused = false;
-		// A fresh gesture is a fresh chance for a backend that previously errored out.
 		this.#consecutiveErrors = 0;
 		this.#setStatus(this.#queue.pendingCount() > 0 ? "speaking" : "idle");
 		this.#pump();
@@ -194,20 +196,18 @@ export class SpeechEngine {
 		// A cancel initiated by pause/skip/stop already settled the item; only
 		// settle here when the item is still the in-flight one.
 		const item = this.#queue.current;
-		if (item !== null) {
-			this.#queue.settleCurrent(ok ? "spoken" : "failed");
-		}
-		if (ok) {
-			this.#consecutiveErrors = 0;
-		} else {
-			this.#consecutiveErrors++;
-			if (this.#consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-				// Halt consumption; only a user action (re-arm/start) retries a
-				// broken backend, never an incoming event via poke().
-				this.#running = false;
-				this.#setStatus("error");
-				return;
-			}
+		this.#consecutiveErrors = ok ? 0 : this.#consecutiveErrors + 1;
+		// Decide the halt BEFORE settling: settling notifies the queue, which can
+		// poke() this pump re-entrantly from the monitor. Clearing `#running`
+		// first is what keeps a broken backend from starting one more utterance.
+		const halt = !ok && this.#consecutiveErrors >= MAX_CONSECUTIVE_ERRORS;
+		if (halt) this.#running = false;
+		if (item !== null) this.#queue.settleCurrent(ok ? "spoken" : "failed");
+		if (halt) {
+			// Halt consumption; only a user action (re-arm/start) retries a
+			// broken backend, never an incoming event via poke().
+			this.#setStatus("error");
+			return;
 		}
 		if (this.#running && !this.#paused) setTimeout(() => this.#pump(), ok ? 0 : 250);
 	}

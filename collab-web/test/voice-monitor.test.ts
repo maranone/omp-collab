@@ -308,6 +308,68 @@ describe("monitor: history reading and explicit actions", () => {
 	});
 });
 
+describe("monitor: backend failure and loaded history", () => {
+	it("a failing backend halts after four attempts and only re-arming retries (plan §7.10)", () => {
+		const h = harness();
+		h.backend.mode = "fail";
+		h.monitor.arm();
+		for (let i = 0; i < 6; i++) {
+			h.client.applyFrameForTest(voiceEntry(msgEntry(`u${i}`, userText(`intento ${i}`))));
+		}
+		// Each failed attempt: immediate backend error, then a 250 ms backoff before the next try.
+		vi.advanceTimersByTime(2_000);
+		expect(h.backend.started).toHaveLength(4);
+		expect(h.monitor.getStats().status).toBe("error");
+		expect(h.monitor.getStats().failed).toBe(4);
+		expect(h.monitor.getStats().pending).toBe(2);
+
+		// Incoming events only poke the engine: a poke must not revive a backend that errored out.
+		h.client.applyFrameForTest(voiceEntry(msgEntry("u6", userText("intento 6"))));
+		vi.advanceTimersByTime(5_000);
+		expect(h.backend.started).toHaveLength(4);
+		expect(h.monitor.getStats().pending).toBe(3);
+		expect(h.monitor.getStats().status).toBe("error");
+
+		// The header toggle is the recovery gesture: a fresh attempt budget, backlog intact.
+		h.backend.mode = "auto";
+		h.monitor.disarm();
+		h.monitor.arm();
+		vi.advanceTimersByTime(500);
+		const stats = h.monitor.getStats();
+		expect(h.backend.started).toHaveLength(7);
+		expect(stats.status).toBe("idle");
+		expect(stats.spoken).toBe(3);
+		expect(stats.failed).toBe(4);
+		expect(stats.pending).toBe(0);
+		teardown(h);
+	});
+
+	it("a loaded history is announced once and an empty session announces nothing (plan §7.8)", () => {
+		const loaded = harness();
+		loaded.monitor.arm();
+		// 12 entries are transferred as history, not narrated: only the count line is spoken.
+		loaded.client.applyFrameForTest(voiceWelcome(12));
+		loaded.client.applyFrameForTest(
+			voiceChunk(
+				Array.from({ length: 12 }, (_, i) => msgEntry(`h${i}`, userText(`histórico ${i}`))),
+				true,
+			),
+		);
+		vi.advanceTimersByTime(500);
+		expect(loaded.backend.started).toEqual(["History loaded: 12 recorded events. Narration starts from now."]);
+		expect(loaded.monitor.registrySize).toBe(1);
+		teardown(loaded);
+
+		const empty = harness();
+		empty.monitor.arm();
+		empty.client.applyFrameForTest(voiceWelcome(0));
+		vi.advanceTimersByTime(500);
+		expect(empty.backend.started).toEqual([]);
+		expect(empty.monitor.registrySize).toBe(0);
+		teardown(empty);
+	});
+});
+
 describe("monitor lifecycle", () => {
 	it("dispose detaches the client seam: later frames are not recorded", () => {
 		const h = harness();
