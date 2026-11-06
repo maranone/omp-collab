@@ -24,6 +24,8 @@ export interface HeaderBarProps {
 	railOpen: boolean;
 	onToggleRail(): void;
 	onLeave(): void;
+	/** Voice cluster; pass a memoized element so the header memo still hits. */
+	voiceSlot?: ReactNode;
 }
 
 /** Memoized on its snapshot fields, so streaming frames that leave them untouched skip it. */
@@ -36,6 +38,7 @@ export const HeaderBar = memo(function HeaderBar({
 	railOpen,
 	onToggleRail,
 	onLeave,
+	voiceSlot,
 }: HeaderBarProps): ReactNode {
 	const title = header?.title ?? state?.sessionName ?? "session";
 	const usage = state?.contextUsage;
@@ -100,6 +103,7 @@ export const HeaderBar = memo(function HeaderBar({
 						))}
 					</span>
 				)}
+				{voiceSlot}
 				<ThemeToggle />
 				<button
 					type="button"

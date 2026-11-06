@@ -40,7 +40,9 @@ export function TodoHud({ phases }: { phases: readonly TodoPhase[] }): ReactNode
 								return (
 									<div className={`td-task td-task--${task.status}`} key={`${task.content}:${taskIndex}`}>
 										<span className="td-branch">{taskIndex === phase.tasks.length - 1 ? "└─" : "├─"}</span>
-										<span className="td-task-icon" aria-hidden="true">{TASK_ICON[task.status]}</span>
+										<span className="td-task-icon" aria-hidden="true">
+											{TASK_ICON[task.status]}
+										</span>
 										<span className="td-task-text">{task.content}</span>
 									</div>
 								);

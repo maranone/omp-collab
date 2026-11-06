@@ -122,6 +122,7 @@ export class GuestClient {
 	/** base64url write token from a full link; absent when joined via a view link. */
 	readonly #writeToken: string | undefined;
 	readonly #listeners = new Set<() => void>();
+	readonly #frameObservers = new Set<(frame: HostFrame) => void>();
 	readonly #pendingTranscripts = new Map<number, PendingTranscript>();
 	#reqSeq = 0;
 	#noticeSeq = 0;
@@ -334,6 +335,30 @@ export class GuestClient {
 			}
 			this.#pushNotice("error", `failed to apply ${frame.t} frame`);
 			this.#commit();
+			return;
+		}
+		this.#notifyFrameObservers(frame);
+	}
+
+	/**
+	 * Observe every applied decrypted frame without altering it (voice
+	 * monitor). Returns an unsubscribe function. An observer's failure can
+	 * never disturb the data plane.
+	 */
+	addFrameObserver(observer: (frame: HostFrame) => void): () => void {
+		this.#frameObservers.add(observer);
+		return () => {
+			this.#frameObservers.delete(observer);
+		};
+	}
+
+	#notifyFrameObservers(frame: HostFrame): void {
+		for (const observer of this.#frameObservers) {
+			try {
+				observer(frame);
+			} catch (err) {
+				console.warn("collab: frame observer failed", frame.t, err);
+			}
 		}
 	}
 
@@ -584,9 +609,8 @@ export class GuestClient {
 				if (!event.success) this.#pushNotice("error", event.finalError ?? "retry failed");
 				break;
 			case "auto_compaction_start":
-				this.#maintenanceStatus = event.action === "context-full"
-					? "Auto context-full maintenance…"
-					: "Auto-compaction maintenance…";
+				this.#maintenanceStatus =
+					event.action === "context-full" ? "Auto context-full maintenance…" : "Auto-compaction maintenance…";
 				break;
 			case "auto_compaction_end":
 				this.#maintenanceStatus = null;
