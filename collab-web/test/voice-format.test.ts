@@ -13,6 +13,7 @@ import {
 	toolEndVoice,
 	toolStartVoice,
 	uiRequestVoice,
+	verdictVoice,
 	voiceNormalize,
 } from "../src/voice/speech-format";
 
@@ -158,5 +159,26 @@ describe("session and lifecycle lines", () => {
 
 	it("ui requests announce the agent needs an answer", () => {
 		expect(uiRequestVoice({ kind: "select", title: "¿elijo A o B?" })).toContain("The agent requests an answer");
+	});
+});
+
+describe("turn verdict (milestones mode)", () => {
+	it("speaks the first sentence of the turn's final message", () => {
+		expect(verdictVoice("The bug was a stale cache. Details follow in the plan.")).toBe(
+			"Turn complete. verdict: The bug was a stale cache.",
+		);
+		expect(verdictVoice("Should I rename it? Then renaming now.")).toBe(
+			"Turn complete. verdict: Should I rename it?",
+		);
+	});
+
+	it("closes an unterminated sentence and caps an overlong one", () => {
+		expect(verdictVoice("the suite is green")).toBe("Turn complete. verdict: the suite is green.");
+		const long = "a".repeat(250);
+		expect(verdictVoice(`${long}. second sentence.`)).toBe(`Turn complete. verdict: ${"a".repeat(199)}…`);
+	});
+
+	it("an empty final message still closes the turn", () => {
+		expect(verdictVoice("   \n  ")).toBe("Turn complete.");
 	});
 });

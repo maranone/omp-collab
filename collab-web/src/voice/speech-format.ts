@@ -226,6 +226,23 @@ export function messageVoice(kind: "user" | "assistant-remainder", text: string)
 	return kind === "user" ? `User message: ${bounded}` : bounded;
 }
 
+/** Longest verdict sentence narrated in milestones mode. */
+const VERDICT_CHARS = 200;
+
+/**
+ * Milestone line closing a turn: its verdict, taken from the first sentence
+ * of the turn's last assistant message. Content is spoken as written; only
+ * the length is bounded.
+ */
+export function verdictVoice(finalText: string): string {
+	const plain = voiceNormalize(finalText);
+	if (!plain) return "Turn complete.";
+	let first = plain.split(/(?<=[.!?…])\s/)[0] ?? plain;
+	if (first.length > VERDICT_CHARS) first = `${first.slice(0, VERDICT_CHARS - 1).trimEnd()}…`;
+	if (!/[.!?…]/.test(first.slice(-1))) first = `${first}.`;
+	return `Turn complete. verdict: ${first}`;
+}
+
 export function thinkingVoice(text: string): string {
 	const spoken = voiceNormalize(text);
 	const bounded = spoken.length > 400 ? `${spoken.slice(0, 400)}…` : spoken;

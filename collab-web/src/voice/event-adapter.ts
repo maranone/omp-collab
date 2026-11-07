@@ -39,12 +39,12 @@ import {
 	toolStartVoice,
 	uiRequestVoice,
 } from "./speech-format";
-import type { VoiceEvent, VoiceLevel } from "./types";
+import type { VoiceEvent, VoiceLevel, VoiceVerbosity } from "./types";
 
 export interface AdapterSettingsView {
 	speakUserMessages: boolean;
 	speakThinking: boolean;
-	verbosity: "normal" | "verbose";
+	verbosity: VoiceVerbosity;
 }
 
 export interface AdapterOptions {
@@ -124,6 +124,8 @@ export class VoiceEventAdapter {
 	#snapshotSync: { total: number; arrived: number; chunkIds: string[]; wasReconnect: boolean } | null = null;
 	#everCompleted = false;
 	#stream: StreamState | null = null;
+	/** Text of the latest assistant message seen; becomes the closing turn's verdict. */
+	#lastAssistantText: string | null = null;
 	#lastStreamUpdateMs = 0;
 	readonly #tools = new Map<string, { name: string; updatedAnnounced: boolean }>();
 	readonly #lifecycleStatus = new Map<string, string>();
@@ -152,6 +154,7 @@ export class VoiceEventAdapter {
 		this.#snapshotSync = null;
 		this.#everCompleted = false;
 		this.#stream = null;
+		this.#lastAssistantText = null;
 		this.#lastStreamUpdateMs = 0;
 		this.#tools.clear();
 		this.#lifecycleStatus.clear();
@@ -362,18 +365,16 @@ export class VoiceEventAdapter {
 				break;
 			case "message_end":
 				if (event.message.role === "assistant") {
+					const finalText = assistantTextRaw(event.message);
+					if (finalText.trim() !== "") this.#lastAssistantText = finalText;
 					if (this.#stream !== null) {
-						this.#streamFull(assistantTextRaw(event.message));
+						this.#streamFull(finalText);
 						this.#emitRemainder();
 						this.#emitThinking(assistantThinkingRaw(event.message));
 						this.#stream.done = true;
 					} else {
 						// Ended without a start seen (mid-stream join): bounded one-shot.
-						this.#push(
-							"assistant-text",
-							"main",
-							messageVoice("assistant-remainder", assistantTextRaw(event.message)),
-						);
+						this.#push("assistant-text", "main", messageVoice("assistant-remainder", finalText));
 					}
 				}
 				break;
@@ -443,7 +444,12 @@ export class VoiceEventAdapter {
 				break;
 			case "turn_start":
 				break; // covered by agent-start/tool narration; kept silent to avoid chatter
-			case "turn_end":
+			case "turn_end": {
+				// The turn's final assistant text rides along as detail: `verbosity:
+				// "minimal"` narrates it as the headline, other modes keep it for
+				// "read in detail". Consumed here so a later turn never re-speaks it.
+				const verdict = this.#lastAssistantText ?? undefined;
+				this.#lastAssistantText = null;
 				this.#push(
 					"turn-end",
 					"main",
@@ -451,8 +457,10 @@ export class VoiceEventAdapter {
 					undefined,
 					"info",
 					`turn-end:${++this.#seq}`,
+					verdict,
 				);
 				break;
+			}
 			case "notice":
 				this.#push(
 					"notice",
@@ -635,6 +643,7 @@ export class VoiceEventAdapter {
 	#finalizeAssistantEntry(message: AssistantMessage): void {
 		const stream = this.#stream;
 		const entryFullRaw = assistantTextRaw(message);
+		if (entryFullRaw.trim() !== "") this.#lastAssistantText = entryFullRaw;
 		if (stream !== null) {
 			const { newText, replacement } = prefixDiff(stream.fullRaw, entryFullRaw);
 			if (!stream.done) {

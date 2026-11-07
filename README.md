@@ -18,6 +18,7 @@ Start a session and use `/collab view` for the read-only link. The relay remains
 
 - Narration speaks the session's own text as it is — assistant messages, user messages, tool output. Only events the protocol does not carry in words get short fixed wording: `Reading notes.txt`, `Command finished. output, 44 lines; first errors: …`, `Subagent started scout.`, `OMP started context compaction.`, `Connection lost. Reconnecting.`
 - Long tool payloads, JSON dumps, fenced code, ANSI and markdown are shortened for speech; the full recorded content stays in the session registry and is reachable through **Read in detail**.
+- Verbosity has three tiers, remembered per browser: **normal (transitions)** — the default, every state change; **detailed (progress)** — adds tool updates, subagent progress and reasoning-level changes; **milestones only** — each turn closes with its verdict headline (`Turn complete. verdict: the first sentence of what the agent finally said`, capped at 200 characters) and only errors, warnings, compaction, subagent lifecycle, reconnection and answer requests are spoken on top. Milestones mode is playback-only: everything is still recorded, **Read in detail** speaks what it silenced, and switching to it drops queued chatter (recorded as skipped) without cutting the utterance in progress.
 - Controls: **Enable voice** plus a settings panel in the header, and a compact HUD above the composer — pause/resume, skip, read last again, read history, clear queue, verbosity, rate, voice, read user messages, read visible reasoning.
 - The queue is FIFO and nothing is dropped when events arrive faster than speech; the pending count and approximate delay are shown. Compaction and subagent activity are narrated in order while the backlog drains.
 - Arming needs one click (browser autoplay policy). Once armed, new events narrate automatically; reconnecting never re-recites the transcript, only the number of events recovered during the gap.
@@ -27,7 +28,7 @@ Start a session and use `/collab view` for the read-only link. The relay remains
 
 This repository and the static app are public. The app does not upload session transcripts to GitHub Pages: the browser connects to OMP's relay, and Collab encrypts session content before sending it. Keep the generated Collab link private; the room key is in its URL fragment and the link grants the access level it was created with. The custom page does not load OMP's analytics script.
 
-Voice narration keeps its event registry in memory only. **Save history in this browser** is opt-in (off by default) and stores settled records in IndexedDB under a session-scoped key, expiring after 72 h; **Clear history** removes them. Room credentials and Collab links are never used as storage keys or values.
+Voice narration keeps its event registry in memory only. Voice preferences — verbosity tier, rate, selected voice, the user-message and reasoning switches — are remembered in this browser's `localStorage`, never sent anywhere. **Save history in this browser** is opt-in (off by default) and stores settled records in IndexedDB under a session-scoped key, expiring after 72 h; **Clear history** removes them. Room credentials and Collab links are never used as storage keys or values.
 
 ## Publishing
 

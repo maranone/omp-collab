@@ -6,7 +6,16 @@ import { VoiceMonitor } from "../src/voice/monitor";
 import { DEFAULT_VOICE_SETTINGS } from "../src/voice/types";
 import { deriveSessionKey } from "../src/voice/speech-storage";
 import { FakeBackend, FakeRecordStore, FakeWebSocket } from "./voice-fakes";
-import { msgEntry, userText, VOICE_HEADER, voiceChunk, voiceEntry, voiceEvent, voiceWelcome } from "./voice-frames";
+import {
+	assistantText,
+	msgEntry,
+	userText,
+	VOICE_HEADER,
+	voiceChunk,
+	voiceEntry,
+	voiceEvent,
+	voiceWelcome,
+} from "./voice-frames";
 
 // Synthetic link only (plan §6): no real room credentials anywhere in these tests.
 const LINK = `roomroomroom1234#${encodeBase64Url(new Uint8Array(32))}`;
@@ -367,6 +376,141 @@ describe("monitor: backend failure and loaded history", () => {
 		expect(empty.backend.started).toEqual([]);
 		expect(empty.monitor.registrySize).toBe(0);
 		teardown(empty);
+	});
+});
+
+describe("monitor: milestones verbosity (plan §7.13)", () => {
+	/** One busy turn: prompt, streamed answer, one command, agent and turn close. */
+	function busyTurn(h: MonitorHarness): void {
+		h.client.applyFrameForTest(voiceWelcome(0));
+		h.client.applyFrameForTest(voiceEvent({ type: "agent_start" }));
+		h.client.applyFrameForTest(voiceEntry(msgEntry("u1", userText("fix the flaky test"))));
+		h.client.applyFrameForTest(
+			voiceEvent({ type: "message_start", message: assistantText("Re-running the flaky test first.") }),
+		);
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "message_end",
+				message: assistantText("Re-running the flaky test first. It passes 200 times now."),
+			}),
+		);
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "226 pass, 0 fail",
+				isError: false,
+			}),
+		);
+		h.client.applyFrameForTest(voiceEvent({ type: "agent_end" }));
+		h.client.applyFrameForTest(voiceEvent({ type: "turn_end" }));
+	}
+
+	it("milestones mode speaks only the verdict while still recording everything (plan §7.13)", () => {
+		const minimal = harness();
+		minimal.monitor.updateSettings({ verbosity: "minimal" });
+		minimal.monitor.arm();
+		busyTurn(minimal);
+		vi.advanceTimersByTime(2_000);
+		expect(minimal.backend.started).toEqual(["Turn complete. verdict: Re-running the flaky test first."]);
+		expect(minimal.monitor.getStats()).toMatchObject({ armed: true, spoken: 1, pending: 0, status: "idle" });
+		teardown(minimal);
+
+		// Same session content under the shipped default: the interactions are spoken.
+		const chatty = harness();
+		chatty.monitor.arm();
+		busyTurn(chatty);
+		vi.advanceTimersByTime(2_000);
+		expect(chatty.backend.started).toContain("User message: fix the flaky test");
+		expect(chatty.backend.started).toContain("The agent has started a task.");
+		expect(chatty.backend.started).toContain("Running bun test");
+		expect(chatty.backend.started).toContain("The agent has finished its run.");
+		expect(chatty.backend.started).toContain("The agent has finished the turn.");
+		expect(chatty.backend.started.some(text => text.startsWith("Turn complete."))).toBe(false);
+		// Filtering is playback-only: both sessions recorded the same events.
+		expect(minimal.monitor.registrySize).toBe(chatty.monitor.registrySize);
+		teardown(chatty);
+	});
+
+	it("failures stay audible in milestones mode (plan §7.10)", () => {
+		const h = harness();
+		h.monitor.updateSettings({ verbosity: "minimal" });
+		h.monitor.arm();
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "Error: dimension mismatch",
+				isError: true,
+			}),
+		);
+		// A close with no assistant text has no verdict, so it is silent here.
+		h.client.applyFrameForTest(voiceEvent({ type: "turn_end" }));
+		vi.advanceTimersByTime(2_000);
+		expect(h.backend.started).toEqual(["Error in bash. detail: Error: dimension mismatch"]);
+		teardown(h);
+	});
+
+	it("switching to milestones mode drops queued chatter and leaves the spoken item alone (plan §7.13)", () => {
+		const h = harness({ hang: true, persist: true });
+		h.monitor.arm();
+		for (let i = 0; i < 3; i++) h.client.applyFrameForTest(voiceEntry(msgEntry(`u${i}`, userText(`prompt ${i}`))));
+		h.client.applyFrameForTest(
+			voiceEvent({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 5,
+				delayMs: 100,
+				errorMessage: "provider timeout",
+			}),
+		);
+		expect(h.monitor.getStats().pending).toBe(3); // 4 queued, the first claimed by the hung backend
+
+		h.monitor.updateSettings({ verbosity: "minimal" });
+		expect(h.monitor.getStats().pending).toBe(1); // only the retry milestone survives the switch
+		expect(h.backend.started).toEqual(["User message: prompt 0"]); // half-spoken utterance is not cut off
+		// Two queued user messages dropped; the retry milestone survives; the
+		// half-spoken item is left running rather than cut off.
+		expect(h.store.records.filter(record => record.status === "skipped")).toHaveLength(2);
+		teardown(h);
+	});
+
+	it("readHistory re-narrates milestones only, and the detail read keeps everything (plan §7.12)", () => {
+		const h = harness();
+		h.monitor.updateSettings({ verbosity: "minimal" });
+		h.monitor.arm();
+		h.client.applyFrameForTest(voiceEntry(msgEntry("u1", userText("first prompt"))));
+		h.client.applyFrameForTest(voiceEvent({ type: "message_start", message: assistantText("Working on it now.") }));
+		h.client.applyFrameForTest(voiceEvent({ type: "message_end", message: assistantText("Working on it now.") }));
+		h.client.applyFrameForTest(voiceEvent({ type: "turn_end" }));
+		vi.advanceTimersByTime(1_000);
+		expect(h.backend.started).toEqual(["Turn complete. verdict: Working on it now."]);
+
+		expect(h.monitor.readHistory()).toBe(1); // only the close is a milestone
+		expect(h.monitor.readHistory(10, true)).toBe(3); // full detail: nothing is silenced by the mode
+		vi.advanceTimersByTime(3_000);
+		expect(h.backend.started.filter(text => text.startsWith("Turn complete."))).toHaveLength(2);
+		expect(h.backend.started).toContain("first prompt");
+		expect(h.backend.started).toContain("Working on it now.");
+		teardown(h);
 	});
 });
 

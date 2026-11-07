@@ -116,6 +116,30 @@ export class SpeechQueue {
 		return removed.length;
 	}
 
+	/**
+	 * Drop queued items a settings change no longer wants narrated, keeping the
+	 * ones `keep` accepts. The in-flight utterance is left alone: cutting a
+	 * half-spoken sentence is worse than finishing it. Dropped items are
+	 * recorded as `skipped`, exactly like `clearPending`.
+	 */
+	prunePending(keep: (item: VoiceItem) => boolean): number {
+		const retained: VoiceItem[] = [];
+		const dropped: VoiceItem[] = [];
+		for (const item of this.#items) {
+			if (keep(item)) retained.push(item);
+			else dropped.push(item);
+		}
+		if (dropped.length === 0) return 0;
+		this.#items.length = 0;
+		for (const item of retained) this.#items.push(item);
+		for (const item of dropped) {
+			item.status = "skipped";
+			this.#opts.onItemStatus?.(item);
+		}
+		this.#opts.onChange?.();
+		return dropped.length;
+	}
+
 	/** Re-queue a copy of the most recently settled item ("read again"). */
 	requeue(item: VoiceItem): VoiceItem | null {
 		const copy: VoiceItem = { ...item, id: `again:${item.id}:${Date.now()}`, status: "pending" };

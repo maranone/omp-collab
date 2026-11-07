@@ -37,8 +37,8 @@ export function loadVoiceSettings(): VoiceSettings {
 		const candidate: Record<string, unknown> = parsed;
 		if (typeof candidate.speakUserMessages === "boolean") settings.speakUserMessages = candidate.speakUserMessages;
 		if (typeof candidate.speakThinking === "boolean") settings.speakThinking = candidate.speakThinking;
-		if (candidate.verbosity === "normal" || candidate.verbosity === "verbose")
-			settings.verbosity = candidate.verbosity;
+		const verbosity = candidate.verbosity;
+		if (verbosity === "minimal" || verbosity === "normal" || verbosity === "verbose") settings.verbosity = verbosity;
 		if (typeof candidate.rate === "number" && candidate.rate >= 0.5 && candidate.rate <= 2)
 			settings.rate = candidate.rate;
 		if (typeof candidate.voiceName === "string" || candidate.voiceName === null)

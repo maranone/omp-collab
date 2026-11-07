@@ -18,7 +18,7 @@ import type { HostFrame } from "@oh-my-pi/pi-wire";
 import type { ConnectionPhase, GuestClient } from "../lib/client";
 import { VoiceEventAdapter } from "./event-adapter";
 import { fnv1a } from "./event-diff";
-import { sessionVoice } from "./speech-format";
+import { sessionVoice, verdictVoice } from "./speech-format";
 import { SpeechEngine, ttsAvailable, WebSpeechBackend, type TtsBackend, type VoiceSpec } from "./speech-engine";
 import { SpeechQueue } from "./speech-queue";
 import {
@@ -29,6 +29,7 @@ import {
 	type VoiceRecord,
 	VoiceRecordStore,
 } from "./speech-storage";
+import { isMilestone, isMilestoneItem } from "./significance";
 import type { VoiceCategory, VoiceEngineStatus, VoiceEvent, VoiceItem, VoiceSettings, VoiceStats } from "./types";
 
 export interface VoiceMonitorOptions {
@@ -165,10 +166,15 @@ export class VoiceMonitor {
 		const n = Math.max(1, Math.min(count ?? this.#settings.historyReadCount, this.#registry.length));
 		// `seq` keeps repeated presses distinct: each press re-narrates, the
 		// queue's id-dedup only guards against transport resync duplicates.
-		const events = this.#registry.slice(this.#registry.length - n).map(event => ({
+		// `minimal` re-narrates milestones only; the full-detail read is the
+		// escape hatch for what milestones mode silenced, so it never filters.
+		const selected = this.#registry
+			.slice(this.#registry.length - n)
+			.filter(event => useDetail || this.#settings.verbosity !== "minimal" || isMilestone(event));
+		const events = selected.map(event => ({
 			...event,
 			id: `hist:${event.id}:${++this.#seq}`,
-			text: useDetail ? (event.detail ?? event.text) : event.text,
+			text: this.#narrationText(event, useDetail),
 		}));
 		const added = this.#queue.enqueue(events, this.#sessionKey);
 		if (added.length > 0 && this.#armed) this.#engine?.start();
@@ -190,6 +196,12 @@ export class VoiceMonitor {
 		Object.assign(this.#settings, patch);
 		this.#settings.rate = Math.min(2, Math.max(0.5, this.#settings.rate));
 		saveVoiceSettings(this.#settings);
+		if (patch.verbosity === "minimal") {
+			// The switch takes effect immediately: chatter already queued under a
+			// denser setting is dropped (each recorded as skipped) rather than
+			// spoken. Items that are milestones keep their slot.
+			this.#queue.prunePending(item => isMilestoneItem(item));
+		}
 		if (patch.persistRecords === true && !this.#recordStore.available && !this.#recordStore.failed) {
 			this.#storageBroken = false;
 			this.#openStore();
@@ -297,11 +309,36 @@ export class VoiceMonitor {
 					});
 			}
 		}
-		// Recording always happens; only playback is gated by activation. The
-		// adapter's cursors advanced meanwhile, so arming starts from "now",
-		// never from a recital of everything registered while off.
-		if (this.#armed) this.#queue.enqueue(events, this.#sessionKey);
+		// Recording always happens; only playback is gated by activation and
+		// verbosity. The adapter's cursors advanced meanwhile, so arming starts
+		// from "now", never from a recital of everything registered while off.
+		if (this.#armed) {
+			let narratable = events;
+			if (this.#settings.verbosity === "minimal") {
+				// Milestones only; the registry above keeps every event, so the
+				// dropped ones are still readable through the detail actions.
+				narratable = events
+					.filter(event => isMilestone(event))
+					.map(event => ({
+						...event,
+						text: this.#narrationText(event),
+					}));
+			}
+			if (narratable.length > 0) this.#queue.enqueue(narratable, this.#sessionKey);
+		}
 		this.#refreshStats();
+	}
+
+	/**
+	 * Spoken text for a recorded event. `minimal` turns a turn close into its
+	 * verdict headline; `useDetail` speaks the full payload instead of the
+	 * short line (the "read in detail" action).
+	 */
+	#narrationText(event: VoiceEvent, useDetail = false): string {
+		if (useDetail) return event.detail ?? event.text;
+		if (this.#settings.verbosity === "minimal" && event.category === "turn-end" && event.detail !== undefined)
+			return verdictVoice(event.detail);
+		return event.text;
 	}
 
 	#onItemSettled(item: VoiceItem): void {

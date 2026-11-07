@@ -66,6 +66,13 @@ describe("voice settings persistence", () => {
 		expect(loaded.voiceName).toBe("Marisol (español)");
 	});
 
+	it("every verbosity tier round-trips, milestones included", () => {
+		for (const verbosity of ["minimal", "normal", "verbose"] as const) {
+			saveVoiceSettings({ ...DEFAULT_VOICE_SETTINGS, verbosity });
+			expect(loadVoiceSettings().verbosity).toBe(verbosity);
+		}
+	});
+
 	it("corrupt payloads fall back to defaults instead of crashing", () => {
 		localStorage.setItem(SETTINGS_STORAGE_KEY, "{no es json");
 		expect(loadVoiceSettings()).toEqual(DEFAULT_VOICE_SETTINGS);

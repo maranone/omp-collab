@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useVoiceStats } from "../../voice/use-voice-monitor";
 import type { VoiceMonitor } from "../../voice/monitor";
 import { ttsAvailable, type VoiceSpec } from "../../voice/speech-engine";
-import type { VoiceStats } from "../../voice/types";
+import type { VoiceStats, VoiceVerbosity } from "../../voice/types";
 import "./voice.css";
 
 const STATUS_LABEL: Record<VoiceStats["status"], string> = {
@@ -35,6 +35,12 @@ function statusLabel(stats: VoiceStats): string {
 	if (stats.armed && stats.status === "idle")
 		return stats.pending > 0 ? `${stats.pending} pending` : STATUS_LABEL.idle;
 	return STATUS_LABEL[stats.status];
+}
+
+/** `<select>` values are strings; anything unrecognized falls back to the default tier. */
+function verbosityFrom(value: string): VoiceVerbosity {
+	if (value === "minimal" || value === "verbose") return value;
+	return "normal";
 }
 
 export interface VoiceControlsProps {
@@ -203,14 +209,20 @@ export function VoiceControls({ monitor }: VoiceControlsProps): ReactNode {
 						<span>Verbosity</span>
 						<select
 							value={settings.verbosity}
-							onChange={e =>
-								monitor.updateSettings({ verbosity: e.target.value === "verbose" ? "verbose" : "normal" })
-							}
+							onChange={e => monitor.updateSettings({ verbosity: verbosityFrom(e.target.value) })}
 						>
+							<option value="minimal">milestones only</option>
 							<option value="normal">normal (transitions)</option>
 							<option value="verbose">detailed (progress)</option>
 						</select>
 					</label>
+					{settings.verbosity === "minimal" && (
+						<p className="vc-hint">
+							Only milestones are spoken: the verdict closing each turn ("Turn complete. verdict: what the agent
+							finally said"), plus errors, compaction, subagents and reconnection. Everything else stays
+							recorded; use Read in detail to hear it.
+						</p>
+					)}
 					<label className="vc-row vc-check">
 						<input
 							type="checkbox"
@@ -234,7 +246,11 @@ export function VoiceControls({ monitor }: VoiceControlsProps): ReactNode {
 							type="button"
 							className="sh-btn"
 							disabled={monitor.registrySize === 0}
-							title={`Queues the last ${settings.historyReadCount} recorded events`}
+							title={
+								settings.verbosity === "minimal"
+									? `Queues the milestones among the last ${settings.historyReadCount} recorded events`
+									: `Queues the last ${settings.historyReadCount} recorded events`
+							}
 							onClick={() => monitor.readHistory()}
 						>
 							<History size={14} />

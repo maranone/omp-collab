@@ -78,13 +78,22 @@ export interface VoiceStats {
 
 export type VoiceEngineStatus = "off" | "idle" | "speaking" | "paused" | "error" | "no-tts";
 
+/**
+ * Narration density.
+ *
+ * - `minimal`: milestones only — turn verdict, errors, compaction, subagent lifecycle, reconnection, ui-request.
+ * - `normal`: every interaction start and end.
+ * - `verbose`: also in-progress tool output and subagent progress.
+ */
+export type VoiceVerbosity = "minimal" | "normal" | "verbose";
+
 export interface VoiceSettings {
 	/** Persisted preference for speaking user messages (activation still requires a gesture). */
 	speakUserMessages: boolean;
 	/** Speak assistant thinking blocks. Off by default; all content stays in the registry. */
 	speakThinking: boolean;
-	/** "normal" narrates semantic transitions; "verbose" adds progress/lifecycle chatter. */
-	verbosity: "normal" | "verbose";
+	/** "minimal" speaks milestones only; "normal" every transition; "verbose" adds progress. */
+	verbosity: VoiceVerbosity;
 	/** SpeechSynthesis rate; 0.8–1.8. */
 	rate: number;
 	/** Selected `SpeechSynthesisVoice.name`, else the best en-* voice. */

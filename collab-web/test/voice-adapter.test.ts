@@ -352,6 +352,24 @@ describe("subagents, notices and session events", () => {
 		expect(feed(voiceEvent({ type: "turn_end" }))[0].text).toBe("The agent has finished the turn.");
 	});
 
+	it("a turn close carries the turn's final assistant text as its verdict (plan §7.13)", () => {
+		const { feed } = harness();
+		feed(voiceEvent({ type: "message_start", message: assistantText("Tests pass now.") }));
+		feed(voiceEvent({ type: "message_update", message: assistantText("Tests pass now. 226 in total.") }));
+		feed(voiceEvent({ type: "message_end", message: assistantText("Tests pass now. 226 in total.") }));
+		const closed = feed(voiceEvent({ type: "turn_end" }));
+		expect(closed[0].text).toBe("The agent has finished the turn.");
+		expect(closed[0].detail).toBe("Tests pass now. 226 in total.");
+		// The verdict is consumed: a close with no new assistant text has none to give.
+		expect(feed(voiceEvent({ type: "turn_end" }))[0].detail).toBeUndefined();
+	});
+
+	it("an assistant entry seen without a stream still yields the verdict (plan §7.13)", () => {
+		const { feed } = harness();
+		feed(voiceEntry(msgEntry("a1", assistantText("Fix applied; the suite is green."))));
+		expect(feed(voiceEvent({ type: "turn_end" }))[0].detail).toBe("Fix applied; the suite is green.");
+	});
+
 	it("user messages respect the setting (plan §7.11)", () => {
 		const on = harness();
 		const events = on.feed(voiceEntry(msgEntry("u1", userText("ejecuta los tests"))));
