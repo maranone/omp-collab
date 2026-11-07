@@ -161,12 +161,22 @@ export class SpeechEngine {
 			return;
 		}
 		const settings = this.#opts.settings();
-		const handle = this.#backend.speak(
-			{ text: item.text, rate: settings.rate, voice: this.#pickVoice(settings) },
-			(ok, error) => {
-				this.#finish(ok, error);
-			},
-		);
+		let handle: SpeakHandle | null;
+		try {
+			handle = this.#backend.speak(
+				{ text: item.text, rate: settings.rate, voice: this.#pickVoice(settings) },
+				(ok, error) => {
+					this.#finish(ok, error);
+				},
+			);
+		} catch (err) {
+			// A browser that throws while building or dispatching the utterance (a
+			// voice that went stale, a refused `speak()`) must follow the same path
+			// as a backend that reports an error. Otherwise the claimed item is
+			// never settled and every later event queues behind a dead slot.
+			this.#finish(false, err instanceof Error ? err.message : "speak threw");
+			return;
+		}
 		if (handle === null) {
 			// No TTS in this browser: mark failed and stop the loop, do not spin.
 			this.#speaking = false;
@@ -278,7 +288,17 @@ export class WebSpeechBackend implements TtsBackend {
 		const voice = spec.voice;
 		if (voice) {
 			const match = synth.getVoices().find(v => v.name === voice.name && v.lang === voice.lang);
-			if (match) utterance.voice = match;
+			// The voice list can change between listing and speaking (device
+			// plug/unplug); a rejected assignment must not lose the utterance —
+			// `utterance.lang` still matches the session language, so the browser's
+			// default voice speaks it.
+			if (match) {
+				try {
+					utterance.voice = match;
+				} catch {
+					// keep the default voice
+				}
+			}
 		}
 		let settled = false;
 		const settle = (ok: boolean, error?: string) => {
@@ -288,10 +308,9 @@ export class WebSpeechBackend implements TtsBackend {
 		};
 		utterance.onend = () => settle(true);
 		utterance.onerror = event => {
-			// "canceled"/"interrupted" are intentional cancels (pause/skip).
-			const type = (event as { error?: string }).error ?? "unknown";
-			if (type === "canceled" || type === "interrupted") settle(false, type);
-			else settle(false, type);
+			// "canceled"/"interrupted" are intentional cancels (pause/skip); they
+			// reach the engine as a failure and it classifies them by status.
+			settle(false, (event as { error?: string }).error ?? "unknown");
 		};
 		synth.speak(utterance);
 		return {

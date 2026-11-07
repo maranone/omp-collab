@@ -3,11 +3,11 @@
 import type { SpeakHandle, SpeakSpec, TtsBackend, VoiceSpec } from "../src/voice/speech-engine";
 import { VoiceRecordStore, type VoiceRecord } from "../src/voice/speech-storage";
 
-/** Controllable TTS backend: completes, hangs (never resolves), always fails, or is absent. */
+/** Controllable TTS backend: completes, hangs (never resolves), always fails, throws synchronously, or is absent. */
 export class FakeBackend implements TtsBackend {
 	readonly started: string[] = [];
 	readonly canceled: string[] = [];
-	mode: "auto" | "hang" | "fail" | "none" = "auto";
+	mode: "auto" | "hang" | "fail" | "throw" | "none" = "auto";
 
 	listVoices(): VoiceSpec[] {
 		return [
@@ -24,6 +24,7 @@ export class FakeBackend implements TtsBackend {
 			this.canceled.push(spec.text);
 		};
 		if (this.mode === "none") return null;
+		if (this.mode === "throw") throw new Error("speak rejected the utterance");
 		if (this.mode === "hang") return { cancel };
 		if (this.mode === "fail") {
 			setTimeout(() => onDone(false, "provider down"), 0);

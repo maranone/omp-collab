@@ -117,9 +117,17 @@ export class VoiceEventAdapter {
 	readonly #opts: AdapterOptions;
 	readonly #idleFlushMs: number;
 	#seq = 0;
+	/**
+	 * Host turn counter, advanced at `turn_start` and again at `turn_end`. OMP
+	 * recycles `toolCallId`s and retry attempt numbers across turns, so every
+	 * turn-scoped id is namespaced by this counter — otherwise a reused id
+	 * collides with the dedup guard and a whole later turn goes silent. Never
+	 * reset: ids must stay distinct across room switches too.
+	 */
+	#turnSeq = 0;
 	/** Entry ids already recorded — survives resyncs so snapshots never re-narrate. */
 	readonly #seenEntryIds = new Set<string>();
-	/** toolCallIds whose end was already narrated (from the event frame). */
+	/** Turn-namespaced keys of tool ends already narrated (from the event frame). */
 	readonly #narratedToolEnds = new Set<string>();
 	#snapshotSync: { total: number; arrived: number; chunkIds: string[]; wasReconnect: boolean } | null = null;
 	#everCompleted = false;
@@ -290,8 +298,10 @@ export class VoiceEventAdapter {
 			}
 			if (message.role === "toolResult") {
 				// Normal path narrates from tool_execution_end (richer result payload).
-				if (this.#narratedToolEnds.has(message.toolCallId)) return;
-				this.#narratedToolEnds.add(message.toolCallId);
+				const endKey = this.#toolEndKey(message.toolCallId);
+				if (this.#narratedToolEnds.has(endKey)) return;
+				this.#narratedToolEnds.add(endKey);
+				this.#boundedSet(this.#narratedToolEnds);
 				this.#push(
 					"tool-end",
 					"main",
@@ -386,7 +396,7 @@ export class VoiceEventAdapter {
 					toolStartVoice(event.toolName, event.args, event.intent),
 					{ toolCallId: event.toolCallId },
 					"info",
-					`tool-start:${event.toolCallId}`,
+					`tool-start:${this.#turnSeq}:${event.toolCallId}`,
 				);
 				break;
 			case "tool_execution_update": {
@@ -400,15 +410,16 @@ export class VoiceEventAdapter {
 						`${tool.name}: output in progress`,
 						{ toolCallId: event.toolCallId },
 						"info",
-						`tool-update:${event.toolCallId}`,
+						`tool-update:${this.#turnSeq}:${event.toolCallId}`,
 					);
 				}
 				break;
 			}
 			case "tool_execution_end": {
 				this.#tools.delete(event.toolCallId);
-				if (!this.#narratedToolEnds.has(event.toolCallId)) {
-					this.#narratedToolEnds.add(event.toolCallId);
+				const endKey = this.#toolEndKey(event.toolCallId);
+				if (!this.#narratedToolEnds.has(endKey)) {
+					this.#narratedToolEnds.add(endKey);
 					this.#boundedSet(this.#narratedToolEnds);
 					this.#push(
 						"tool-end",
@@ -416,7 +427,7 @@ export class VoiceEventAdapter {
 						toolEndVoice(event.toolName, event.result, event.isError === true),
 						{ toolCallId: event.toolCallId },
 						event.isError ? "error" : "info",
-						`tool-end:${event.toolCallId}`,
+						`tool-end:${endKey}`,
 						resultText(event.result),
 					);
 				}
@@ -443,6 +454,7 @@ export class VoiceEventAdapter {
 				);
 				break;
 			case "turn_start":
+				this.#turnSeq++;
 				break; // covered by agent-start/tool narration; kept silent to avoid chatter
 			case "turn_end": {
 				// The turn's final assistant text rides along as detail: `verbosity:
@@ -459,6 +471,9 @@ export class VoiceEventAdapter {
 					`turn-end:${++this.#seq}`,
 					verdict,
 				);
+				// Advance here too: a guest joining mid-turn, or a host that omits
+				// `turn_start`, must still see a distinct namespace for the next turn.
+				this.#turnSeq++;
 				break;
 			}
 			case "notice":
@@ -468,7 +483,7 @@ export class VoiceEventAdapter {
 					noticeVoice(event.level, event.message),
 					undefined,
 					event.level,
-					`notice:${event.level}:${event.message}`,
+					`notice:${this.#turnSeq}:${event.level}:${event.message}`,
 					event.message,
 				);
 				break;
@@ -479,7 +494,9 @@ export class VoiceEventAdapter {
 					retryVoice(event.attempt, event.maxAttempts, event.errorMessage),
 					{ attempt: event.attempt },
 					"warning",
-					`retry-start:${event.attempt}`,
+					// Attempt numbers restart every turn: without the turn namespace a
+					// second failing turn would be swallowed as a duplicate.
+					`retry-start:${this.#turnSeq}:${event.attempt}`,
 				);
 				break;
 			case "auto_retry_end":
@@ -490,7 +507,7 @@ export class VoiceEventAdapter {
 						`Retry failed: ${event.finalError ?? "unknown error"}`,
 						undefined,
 						"error",
-						`retry-end:${event.attempt}`,
+						`retry-end:${this.#turnSeq}:${event.attempt}`,
 					);
 				break;
 			case "auto_compaction_start":
@@ -552,7 +569,9 @@ export class VoiceEventAdapter {
 				lifecycleVoice(status, label),
 				{ lifecycleId: id },
 				status === "failed" ? "warning" : "info",
-				`lifecycle:${id}:${status}`,
+				// `#lifecycleStatus` already suppresses a repeat of the same status, so
+				// every surviving transition is distinct: give it a distinct id.
+				`lifecycle:${id}:${status}:${++this.#seq}`,
 			);
 			return;
 		}
@@ -573,7 +592,7 @@ export class VoiceEventAdapter {
 				`Subagent ${label}: ${collapse(intent)}`,
 				undefined,
 				"info",
-				`progress:${id}:${intent}`,
+				`progress:${id}:${++this.#seq}`,
 			);
 		}
 	}
@@ -668,7 +687,7 @@ export class VoiceEventAdapter {
 						spoken,
 						undefined,
 						"info",
-						`entry-remainder:${message.timestamp}:${spoken.length}`,
+						`entry-remainder:${message.timestamp}:${++this.#seq}`,
 					);
 			}
 			this.#stream = null;
@@ -683,7 +702,7 @@ export class VoiceEventAdapter {
 				messageVoice("assistant-remainder", spoken),
 				undefined,
 				"info",
-				`assistant-entry:${message.timestamp}:${spoken.length}`,
+				`assistant-entry:${message.timestamp}:${++this.#seq}`,
 			);
 	}
 
@@ -711,6 +730,11 @@ export class VoiceEventAdapter {
 			meta,
 			detail: detail === undefined ? undefined : boundedDetail(detail),
 		});
+	}
+
+	/** Pairing key between a `tool_execution_end` event and its `toolResult` entry. */
+	#toolEndKey(toolCallId: string): string {
+		return `${this.#turnSeq}:${toolCallId}`;
 	}
 
 	#boundedSet(set: Set<string>, cap = 4000): void {

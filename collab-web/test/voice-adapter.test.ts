@@ -411,3 +411,174 @@ describe("subagents, notices and session events", () => {
 		expect(events[0].text).toBe("The agent requests an edit: editar el env");
 	});
 });
+
+describe("identifiers reused across turns (plan §7.14)", () => {
+	it("a reused toolCallId narrates again in a later turn", () => {
+		const { feed } = harness();
+		feed(voiceEvent({ type: "turn_start" }));
+		feed(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		const first = feed(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "226 pass",
+				isError: false,
+			}),
+		);
+		feed(voiceEvent({ type: "turn_end" }));
+
+		feed(voiceEvent({ type: "turn_start" }));
+		feed(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		const second = feed(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "236 pass",
+				isError: false,
+			}),
+		);
+
+		expect(first).toHaveLength(1);
+		expect(second).toHaveLength(1);
+		expect(second[0].id).not.toBe(first[0].id);
+		expect(second[0].text).toBe("Command finished. output: 236 pass");
+	});
+
+	it("replays inside the same turn are still deduped (plan §7.14)", () => {
+		const { feed } = harness();
+		feed(voiceEvent({ type: "turn_start" }));
+		feed(voiceEvent({ type: "tool_execution_start", toolCallId: "t1", toolName: "grep", args: { pattern: "x" } }));
+		expect(
+			feed(
+				voiceEvent({
+					type: "tool_execution_end",
+					toolCallId: "t1",
+					toolName: "grep",
+					result: "match",
+					isError: false,
+				}),
+			),
+		).toHaveLength(1);
+		expect(feed(voiceEntry(msgEntry("tr1", toolResultMsg("t1", "grep", "match"))))).toHaveLength(0);
+		expect(feed(voiceEntry(msgEntry("tr1", toolResultMsg("t1", "grep", "match"))))).toHaveLength(0);
+	});
+
+	it("retry attempt numbers restarting in a later turn narrate again", () => {
+		const { feed } = harness();
+		feed(voiceEvent({ type: "turn_start" }));
+		const firstAttempt = feed(
+			voiceEvent({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 100,
+				errorMessage: "provider timeout",
+			}),
+		);
+		feed(voiceEvent({ type: "turn_end" }));
+
+		feed(voiceEvent({ type: "turn_start" }));
+		const secondAttempt = feed(
+			voiceEvent({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 100,
+				errorMessage: "provider timeout",
+			}),
+		);
+
+		expect(firstAttempt).toHaveLength(1);
+		expect(secondAttempt).toHaveLength(1);
+		expect(secondAttempt[0].text).toBe("Retry 1 of 3: provider timeout");
+		expect(secondAttempt[0].id).not.toBe(firstAttempt[0].id);
+	});
+
+	it("a subagent returning to a status after leaving it is announced again", () => {
+		const { feed } = harness();
+		const started = feed(
+			voiceBus("task:subagent:lifecycle", {
+				id: "agent-1",
+				agent: "sub-a",
+				description: "scout de login",
+				status: "started",
+				index: 0,
+			}),
+		);
+		feed(voiceBus("task:subagent:lifecycle", { id: "agent-1", agent: "sub-a", status: "completed", index: 0 }));
+		const restarted = feed(
+			voiceBus("task:subagent:lifecycle", {
+				id: "agent-1",
+				agent: "sub-a",
+				description: "scout de login",
+				status: "started",
+				index: 0,
+			}),
+		);
+		expect(started).toHaveLength(1);
+		expect(restarted).toHaveLength(1);
+		expect(restarted[0].id).not.toBe(started[0].id);
+	});
+
+	it("a host that never sends turn_start still namespaces the next turn", () => {
+		const { feed } = harness();
+		feed(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		const first = feed(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "226 pass",
+				isError: false,
+			}),
+		);
+		feed(voiceEvent({ type: "agent_end" }));
+		feed(voiceEvent({ type: "turn_end" }));
+
+		feed(
+			voiceEvent({
+				type: "tool_execution_start",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: { command: "bun test" },
+			}),
+		);
+		const second = feed(
+			voiceEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				result: "236 pass",
+				isError: false,
+			}),
+		);
+
+		expect(first).toHaveLength(1);
+		expect(second).toHaveLength(1);
+		expect(second[0].text).toBe("Command finished. output: 236 pass");
+		expect(second[0].id).not.toBe(first[0].id);
+	});
+});

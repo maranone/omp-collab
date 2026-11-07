@@ -21,6 +21,8 @@ Start a session and use `/collab view` for the read-only link. The relay remains
 - Verbosity has three tiers, remembered per browser: **normal (transitions)** — the default, every state change; **detailed (progress)** — adds tool updates, subagent progress and reasoning-level changes; **milestones only** — each turn closes with its verdict headline (`Turn complete. verdict: the first sentence of what the agent finally said`, capped at 200 characters) and only errors, warnings, compaction, subagent lifecycle, reconnection and answer requests are spoken on top. Milestones mode is playback-only: everything is still recorded, **Read in detail** speaks what it silenced, and switching to it drops queued chatter (recorded as skipped) without cutting the utterance in progress.
 - Controls: **Enable voice** plus a settings panel in the header, and a compact HUD above the composer — pause/resume, skip, read last again, read history, clear queue, verbosity, rate, voice, read user messages, read visible reasoning.
 - The queue is FIFO and nothing is dropped when events arrive faster than speech; the pending count and approximate delay are shown. Compaction and subagent activity are narrated in order while the backlog drains.
+- Identifiers OMP reuses — the same `toolCallId` in a later turn, retry attempt numbers that restart each turn, a subagent returning to a status — narrate again. Dedup only absorbs snapshot replays *inside* a turn, so a reused id can never silence a later turn.
+- A browser that refuses an utterance (a selected voice that disappeared, a failed synthesis) is contained: the item is recorded as failed and the queue keeps draining. After four consecutive failures the engine stops rather than hammering a broken backend; re-enabling voice resumes it.
 - Arming needs one click (browser autoplay policy). Once armed, new events narrate automatically; reconnecting never re-recites the transcript, only the number of events recovered during the gap.
 - If the browser has no `speechSynthesis`, the monitor reports **No speech in this browser** and still records events.
 
@@ -39,7 +41,7 @@ Rebuild from a checkout of the pinned upstream OMP workspace (`96e4d8eb5ba1212d2
 ```sh
 bun install                                # once; bun.lock regenerates if the catalog drifted
 bun run gen:export-viewer --write          # after component changes; writes packages/coding-agent/export-assets
-bun test voice                           # 95 voice tests (226 across the package)
+bun test voice                           # 120 voice tests (251 across the package)
 bun x tsc --noEmit -p tsconfig.json      # not `bun run check:types`: it recurses into `check` on Bun 1.4.4
 bun x oxlint src test
 bun build ./index.html --outdir=dist --minify --define 'process.env.NODE_ENV="production"' \

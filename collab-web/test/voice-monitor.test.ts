@@ -9,6 +9,7 @@ import { FakeBackend, FakeRecordStore, FakeWebSocket } from "./voice-fakes";
 import {
 	assistantText,
 	msgEntry,
+	toolResultMsg,
 	userText,
 	VOICE_HEADER,
 	voiceChunk,
@@ -510,6 +511,50 @@ describe("monitor: milestones verbosity (plan §7.13)", () => {
 		expect(h.backend.started.filter(text => text.startsWith("Turn complete."))).toHaveLength(2);
 		expect(h.backend.started).toContain("first prompt");
 		expect(h.backend.started).toContain("Working on it now.");
+		teardown(h);
+	});
+});
+
+describe("monitor: reused identifiers across turns (plan §7.14)", () => {
+	it("a tool id reused in a later turn is narrated again, not swallowed as a duplicate", () => {
+		const h = harness();
+		h.monitor.arm();
+		h.client.applyFrameForTest(voiceWelcome(0));
+		vi.advanceTimersByTime(1);
+
+		// OMP reuses `t1` for the first tool call of every turn; the toolResult
+		// entry that follows must not add a second copy inside the same turn.
+		for (const [result, entryId] of [
+			["226 pass", "tr1"],
+			["236 pass", "tr2"],
+		] as const) {
+			h.client.applyFrameForTest(voiceEvent({ type: "turn_start" }));
+			h.client.applyFrameForTest(
+				voiceEvent({
+					type: "tool_execution_start",
+					toolCallId: "t1",
+					toolName: "bash",
+					args: { command: "bun test" },
+				}),
+			);
+			h.client.applyFrameForTest(
+				voiceEvent({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result, isError: false }),
+			);
+			h.client.applyFrameForTest(voiceEntry(msgEntry(entryId, toolResultMsg("t1", "bash", result))));
+			h.client.applyFrameForTest(voiceEvent({ type: "turn_end" }));
+			vi.advanceTimersByTime(10_000);
+		}
+
+		expect(h.backend.started).toEqual([
+			"Running bun test",
+			"Command finished. output: 226 pass",
+			"The agent has finished the turn.",
+			"Running bun test",
+			"Command finished. output: 236 pass",
+			"The agent has finished the turn.",
+		]);
+		expect(h.monitor.getStats().spoken).toBe(6);
+		expect(h.monitor.getStats().pending).toBe(0);
 		teardown(h);
 	});
 });

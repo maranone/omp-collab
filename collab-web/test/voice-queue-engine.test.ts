@@ -187,6 +187,32 @@ describe("speech engine consumption", () => {
 		expect(h.settled.every(i => i.status === "failed")).toBe(true);
 	});
 
+	it("a backend that throws mid-call is contained, not wedged (plan §7.15)", () => {
+		const backend = new FakeBackend();
+		backend.mode = "throw";
+		const h = harness(backend);
+		h.queue.enqueue(
+			Array.from({ length: 5 }, (_, i) => ev(`e${i}`, `item ${i}`)),
+			"s",
+		);
+		h.engine.start();
+		vi.advanceTimersByTime(2_000);
+		expect(backend.started).toHaveLength(4); // same escalation as a reported error
+		expect(h.engine.status).toBe("error");
+		expect(h.queue.pendingCount()).toBe(1); // the claimed item settled; nothing stranded
+		vi.advanceTimersByTime(20_000);
+		expect(backend.started).toHaveLength(4);
+
+		// The defect this guards: a throw left the utterance slot claimed, so every
+		// later event queued behind a dead one. Recovery must still drain the queue.
+		backend.mode = "auto";
+		h.engine.start(); // a user gesture (re-arm) is the only resume path
+		vi.advanceTimersByTime(2_000);
+		expect(backend.started).toHaveLength(5);
+		expect(h.queue.pendingCount()).toBe(0);
+		expect(h.engine.status).toBe("idle");
+	});
+
 	it("a stuck utterance is cut by the watchdog and the queue never blocks (plan §7.10)", () => {
 		const backend = new FakeBackend();
 		backend.mode = "hang";
