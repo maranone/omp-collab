@@ -1,0 +1,6 @@
+node_modules/
+bun.lock
+bun.lockb
+
+# throwaway dev artifacts (live browser checks, scratch fixtures)
+.tmp_*

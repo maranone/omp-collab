@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Feed media renders inline: ```` ```svg ```` blocks are sanitized and drawn as live inline art, ```` ```mp4 ````/```` ```video ````/```` ```image ```` fences carrying base64 or `data:` payloads embed an image/video player, and Markdown media links (`![…](…)`) with `data:image/*`, `data:video/*`, or `http(s)` media URLs render as inline images/players instead of broken markup.
+
 ### Changed
 
-- Matched the Collab web client to OMP's Titanium colors, kept the active TODO plan visible, expanded thinking blocks by default, and added a scrolling current-task footer.
+- Matched the Collab web client to OMP's Titanium colors, kept the active TODO plan visible, and added a scrolling current-task footer.
+- Thinking blocks start collapsed; click the header to expand.
 
 ## [18.15.0] - 2026-11-01
 

@@ -66,7 +66,7 @@ function Row({
 }
 
 function ThinkingBlock({ text, redacted }: { text: string; redacted?: boolean }): ReactNode {
-	const [open, setOpen] = useState(true);
+	const [open, setOpen] = useState(false);
 	return (
 		<div className="tr-think">
 			<button type="button" className="tr-think-head" onClick={() => setOpen(v => !v)}>

@@ -117,6 +117,39 @@ describe("Transcript live tool rendering", () => {
 	});
 });
 
+describe("Transcript thinking blocks", () => {
+	it("starts thinking collapsed: header only, reasoning hidden until expanded", () => {
+		const html = renderTranscript({
+			entries: [
+				{
+					type: "message",
+					id: "thinking-entry",
+					parentId: null,
+					timestamp: "2026-07-09T00:00:00Z",
+					message: {
+						role: "assistant",
+						content: [
+							{ type: "thinking", thinking: "private deliberation text" },
+							{ type: "text", text: "the visible answer" },
+						],
+						model: "test/model",
+						usage: assistantUsage(),
+						stopReason: "stop",
+						timestamp: 1,
+					},
+				},
+			],
+			working: false,
+		});
+
+		expect(html).toContain("the visible answer");
+		expect(html).toContain("tr-think-head");
+		expect(html).not.toContain("private deliberation text");
+		expect(html).not.toContain("tr-think-body");
+		expect(html).not.toContain("tr-chev--open");
+	});
+});
+
 describe("Transcript message Markdown", () => {
 	it("renders host strings and guest text blocks as Markdown", () => {
 		const entries: SessionEntry[] = [

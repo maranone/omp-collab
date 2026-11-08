@@ -229,3 +229,67 @@ describe("Streaming Markdown", () => {
 		expect(`<div class="tr-md">${rewritten.html}</div>`).toBe(renderMarkdown("uno\n\ntwo"));
 	});
 });
+
+describe("Feed media", () => {
+	it("renders svg fences inline with scripts, handlers, and external hrefs removed", () => {
+		const html = renderMarkdown(
+			"```svg\n<svg viewBox=\"0 0 10 10\" xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script><g onload=\"evil()\"><path d=\"M0 0L10 10\" stroke=\"currentColor\"/><text x=\"1\" y=\"5\" fill=\"var(--fg)\">hi</text></g><foreignObject width=\"1\" height=\"1\"><p>nope</p></foreignObject></svg>\n```",
+		);
+
+		expect(html).toContain('<div class="tr-svg">');
+		expect(html).toContain('<svg viewBox="0 0 10 10"');
+		expect(html).toContain('fill="var(--fg)"');
+		expect(html).not.toContain("alert");
+		expect(html).not.toContain("onload");
+		expect(html).not.toContain("foreignObject");
+		expect(html).not.toContain("nope");
+	});
+
+	it("keeps internal svg fragment references and inline data:image hrefs only", () => {
+		const html = renderMarkdown(
+			"```svg\n<svg><defs><clipPath id=\"c\"><rect/></clipPath></defs><image xlink:href=\"https://evil.test/x.png\"/><a href=\"#sec\">ok</a></svg>\n```",
+		);
+
+		expect(html).not.toContain("evil.test");
+		expect(html).toContain('href="#sec"');
+		expect(html).toContain('<clipPath id="c">');
+	});
+
+	it("falls back to a code block when an svg fence cannot be sanitized cleanly", () => {
+		const html = renderMarkdown("```svg\n<svg attr=\"unterminated <circle/>\n```");
+
+		expect(html).toContain('<pre><code class="language-svg">');
+		expect(html).not.toContain("<circle");
+	});
+
+	it("embeds mp4 fences as video players and image fences as images", () => {
+		const video = renderMarkdown("```mp4\nAAAAZGF0YQ==\n```");
+		expect(video).toContain('<video class="tr-video" controls preload="metadata" src="data:video/mp4;base64,AAAAZGF0YQ=="></video>');
+
+		const image = renderMarkdown("```image\niVBORw0KGgo=\n```");
+		expect(image).toContain('<img class="tr-img" alt="" src="data:image/png;base64,iVBORw0KGgo=">');
+	});
+
+	it("accepts full data URIs inside media fences", () => {
+		const html = renderMarkdown("```video\ndata:video/webm;base64,AAAAZGF0YQ==\n```");
+		expect(html).toContain('src="data:video/webm;base64,AAAAZGF0YQ=="');
+	});
+
+	it("renders Markdown media links inline for data: and http(s) media", () => {
+		const shot = renderMarkdown("![shot](data:image/png;base64,iVBORw0KGgo=)");
+		expect(shot).toContain('<img class="tr-img" src="data:image/png;base64,iVBORw0KGgo=" alt="shot">');
+
+		const clip = renderMarkdown("![clip](https://host.test/a.mp4)");
+		expect(clip).toContain('<video class="tr-video" controls preload="metadata" src="https://host.test/a.mp4">');
+	});
+
+	it("refuses non-media data URIs and script links in image positions", () => {
+		const htmlText = renderMarkdown('![x](data:text/html,<b>hi</b>)');
+		expect(htmlText).not.toContain("<img");
+		expect(htmlText).toContain("x");
+
+		const evil = renderMarkdown("![x](javascript:alert(1))");
+		expect(evil).not.toContain("<img");
+		expect(evil).not.toContain("javascript:");
+	});
+});

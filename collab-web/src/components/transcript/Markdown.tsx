@@ -57,6 +57,142 @@ function safeHref(href: string): string | null {
 	return null; // unknown scheme (javascript:, data:, …)
 }
 
+/** Inline SVG fences larger than this fall back to a code block. */
+const MAX_INLINE_SVG_CHARS = 400_000;
+/** Embedded data: URIs larger than this are refused; multi-MB blobs bloat the DOM. */
+const MAX_DATA_URI_CHARS = 12_000_000;
+
+/** Classify a Markdown image/media `src` into an embeddable kind. */
+function safeMediaSrc(href: string): { kind: "image" | "video"; src: string } | null {
+	const trimmed = href.trim();
+	if (trimmed.startsWith("data:")) {
+		if (trimmed.length > MAX_DATA_URI_CHARS) return null;
+		const mime = (/^data:([^;,]+)/i.exec(trimmed)?.[1] ?? "").toLowerCase();
+		if (mime.startsWith("image/")) return { kind: "image", src: trimmed };
+		if (mime.startsWith("video/")) return { kind: "video", src: trimmed };
+		return null; // data:text/html, data:script, …
+	}
+	let protocol: string;
+	try {
+		({ protocol } = new URL(trimmed, "https://relative.invalid/"));
+	} catch {
+		return null;
+	}
+	if (protocol !== "https:" && protocol !== "http:") return null;
+	if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(trimmed)) return { kind: "video", src: trimmed };
+	return { kind: "image", src: trimmed };
+}
+
+/** Magic-number sniff for raw base64 image payloads; defaults to PNG. */
+function sniffImageMime(b64: string): string {
+	if (b64.startsWith("/9j/")) return "image/jpeg";
+	if (b64.startsWith("R0lGOD")) return "image/gif";
+	if (b64.startsWith("UklGR")) return "image/webp";
+	if (b64.startsWith("PHN2Zw")) return "image/svg+xml";
+	return "image/png";
+}
+
+/** Turn a fenced media body (bare base64 or a full data: URI) into a usable src. */
+function fencedMediaSrc(body: string, lang: string): string | null {
+	const trimmed = body.trim();
+	if (trimmed.startsWith("data:")) {
+		const mime = (/^data:([^;,]+)/i.exec(trimmed)?.[1] ?? "").toLowerCase();
+		const ok = lang === "svg" ? mime.startsWith("image/svg") : /^(image|video)\//.test(mime);
+		return ok && trimmed.length <= MAX_DATA_URI_CHARS ? trimmed : null;
+	}
+	if (!/^[A-Za-z0-9+/]+[\s\r\n]*[A-Za-z0-9+/]*={0,2}$/.test(trimmed)) return null;
+	const b64 = trimmed.replace(/\s/g, "");
+	if (b64.length > MAX_DATA_URI_CHARS) return null;
+	if (lang === "image" || lang === "img") return `data:${sniffImageMime(b64)};base64,${b64}`;
+	if (lang === "webm") return `data:video/webm;base64,${b64}`;
+	if (lang === "mov") return `data:video/quicktime;base64,${b64}`;
+	return `data:video/mp4;base64,${b64}`;
+}
+
+/** Structural SVG elements the inline sanitizer keeps; anything else is unwrapped. */
+const SVG_ALLOWED: Record<string, true> = {
+	svg: true, g: true, a: true, path: true, rect: true, circle: true, ellipse: true,
+	line: true, polyline: true, polygon: true, text: true, tspan: true, textpath: true,
+	defs: true, use: true, symbol: true, marker: true, clippath: true, mask: true,
+	pattern: true, lineargradient: true, radialgradient: true, stop: true, filter: true,
+	fegaussianblur: true, feoffset: true, feblend: true, fecolormatrix: true,
+	femergenode: true, femerge: true, feflood: true, fecomposite: true, fedropshadow: true,
+	image: true, title: true, desc: true, style: true,
+};
+/** Elements whose whole subtree is deleted (script execution / plugin vectors). */
+const SVG_DROPPED = [
+	"script", "foreignObject", "iframe", "object", "embed", "applet", "audio", "video",
+	"animate", "animateTransform", "animateMotion", "set", "handler", "listener",
+];
+
+function stripSvgDanger(raw: string): string {
+	let s = raw
+		.replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+		.replace(/<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/g, "")
+		.replace(/<\?[\s\S]*?(?:\?>|$)/g, "")
+		.replace(/<!doctype[^>]*>?/gi, "")
+		.replace(/<!entity[\s\S]*?(?:>|$)/gi, "");
+	for (const name of SVG_DROPPED) {
+		s = s.replace(new RegExp(`<${name}\\b[^>]*>[\\s\\S]*?<\\/${name}\\s*>`, "gi"), "");
+		s = s.replace(new RegExp(`<${name}\\b[^>]*/?>`, "gi"), "");
+	}
+	// A <style> block reaching outward (external refs, CSS expressions) is deleted whole.
+	return s.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, block =>
+		/url\s*\(|@import|expression|javascript|<\//i.test(block) ? "" : block,
+	);
+}
+
+function cleanSvgAttrs(attrs: string): string {
+	const kept: string[] = [];
+	const pair = /([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
+	for (const match of attrs.matchAll(pair)) {
+		const name = match[1];
+		const raw = match[2];
+		if (!name || /^on/i.test(name)) continue; // event handlers never survive
+		if (raw === undefined) continue; // valueless attributes carry nothing SVG needs
+		const value = raw.replace(/^["']|["']$/g, "");
+		const lname = name.toLowerCase();
+		if (lname === "href" || lname === "xlink:href") {
+			// Internal fragment references and inline images only; no external fetches.
+			if (/^#/i.test(value) || /^data:image\//i.test(value)) kept.push(`${name}="${escapeHtml(value)}"`);
+			continue;
+		}
+		if (lname === "src") {
+			if (/^data:image\//i.test(value)) kept.push(`${name}="${escapeHtml(value)}"`);
+			continue;
+		}
+		if (lname === "style") {
+			if (!/url\s*\(|expression|behavior|javascript|@import/i.test(value)) kept.push(`style="${escapeHtml(value)}"`);
+			continue;
+		}
+		kept.push(`${name}="${escapeHtml(value)}"`);
+	}
+	return kept.length ? ` ${kept.join(" ")}` : "";
+}
+
+/**
+ * Rebuild an SVG string from an allowlist of elements and attributes. Returns null
+ * when the result could not be parsed into only-whitelisted markup (unbalanced
+ * quotes, stray `<`), so the caller keeps it as a code block instead.
+ */
+function sanitizeSvg(raw: string): string | null {
+	let s = stripSvgDanger(raw);
+	s = s.replace(
+		/<(\/?)([A-Za-z][A-Za-z0-9:._-]*)((?:"[^"]*"|'[^']*'|[^<>"'])*?)(\/?)>/g,
+		(_all, close: string, tag: string, attrs: string, self: string) => {
+			const local = (tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : tag).toLowerCase();
+			if (!SVG_ALLOWED[local]) return ""; // unwrap non-whitelisted markup
+			if (close) return `</${tag}>`;
+			return `<${tag}${cleanSvgAttrs(attrs)}${self ? " /" : ""}>`;
+		},
+	);
+	// Anything still holding a `<` came from a malformed tag (unterminated quote
+	// swallowing markup); refuse the whole fence rather than trust the remnant.
+	if (s.replace(/<\/?[A-Za-z][A-Za-z0-9:._-]*(?:"[^"]*"|'[^']*'|[^<>])*?>/g, "").includes("<")) return null;
+	if (!/<svg\b/i.test(s)) return null;
+	return s.trim();
+}
+
 const md = new Marked({
 	gfm: true,
 	renderer: {
@@ -72,6 +208,36 @@ const md = new Marked({
 			if (url === null) return inner;
 			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 			return `<a href="${escapeHtml(url)}"${titleAttr} target="_blank" rel="noopener">${inner}</a>`;
+		},
+		// Media fences: ```svg renders inline (sanitized), ```mp4/```video/```image
+		// embed data-URI players, everything else keeps the default code block.
+		code(token) {
+			const text = token.text;
+			const lang = (token.lang ?? "").match(/^\S*/)?.[0].toLowerCase() ?? "";
+			if (lang === "svg" && text.length <= MAX_INLINE_SVG_CHARS) {
+				const clean = sanitizeSvg(text);
+				if (clean !== null) return `<div class="tr-svg">${clean}</div>\n`;
+			}
+			if (lang === "mp4" || lang === "webm" || lang === "mov" || lang === "m4v" || lang === "video") {
+				const src = fencedMediaSrc(text, lang);
+				if (src !== null) return `<video class="tr-video" controls preload="metadata" src="${escapeHtml(src)}"></video>\n`;
+			}
+			if (lang === "image" || lang === "img") {
+				const src = fencedMediaSrc(text, lang);
+				if (src !== null) return `<img class="tr-img" alt="" src="${escapeHtml(src)}">\n`;
+			}
+			const code = token.escaped ? text : escapeHtml(text);
+			const language = (token.lang ?? "").match(/^\S*/)?.[0] ?? "";
+			return `<pre><code${language ? ` class="language-${escapeHtml(language)}"` : ""}>${code}${text.endsWith("\n") ? "" : "\n"}</code></pre>\n`;
+		},
+		// Markdown media: data: images/videos and http(s) media URLs embed inline;
+		// other schemes collapse to the alt text, like unsafe links do.
+		image({ href, title, text }) {
+			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+			const media = safeMediaSrc(href ?? "");
+			if (media?.kind === "video") return `<video class="tr-video" controls preload="metadata" src="${escapeHtml(media.src)}"${titleAttr}></video>`;
+			if (media?.kind === "image") return `<img class="tr-img" src="${escapeHtml(media.src)}" alt="${escapeHtml(text ?? "")}"${titleAttr}>`;
+			return escapeHtml(text ?? "");
 		},
 	},
 	breaks: true,

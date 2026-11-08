@@ -92,6 +92,39 @@
 	border-radius: var(--radius-sm);
 }
 
+/* ---- inline media in assistant markdown ---- */
+
+.tr-md .tr-img {
+	display: block;
+	max-height: 420px;
+	max-width: min(100%, 640px);
+	height: auto;
+	margin: 6px 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+}
+
+.tr-md .tr-video {
+	display: block;
+	width: min(100%, 640px);
+	max-height: 420px;
+	margin: 6px 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: #000;
+}
+
+.tr-md .tr-svg {
+	margin: 6px 0;
+	overflow-x: auto;
+}
+
+.tr-md .tr-svg svg {
+	display: block;
+	max-width: 100%;
+	height: auto;
+}
+
 /* ---- chips & badges ---- */
 
 .tr-badge {
